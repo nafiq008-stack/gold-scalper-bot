@@ -1,0 +1,34 @@
+name: Gold Strategy Check
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}   # lets you manually trigger a run from the GitHub Actions tab
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pandas requests
+
+      - name: Run strategy check
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+        run: python engine_check.py
+
+      - name: Commit updated state
+        run: |
+          git config user.name "gold-scalper-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add state.json signals_log.csv
+          git diff --quiet --cached || git commit -m "Update state [skip ci]"
+          git push

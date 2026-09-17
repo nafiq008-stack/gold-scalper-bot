@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gold Scalper Control</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --green: #22c55e;
+    --red: #ef4444;
+    --border: #334155;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    padding: 20px;
+    padding-top: max(20px, env(safe-area-inset-top));
+  }
+  h1 { font-size: 1.3rem; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 0.85rem; margin-bottom: 24px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .status-label { font-size: 1rem; color: var(--muted); }
+  .status-badge {
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.9rem;
+  }
+  .status-on { background: rgba(34,197,94,0.15); color: var(--green); }
+  .status-off { background: rgba(239,68,68,0.15); color: var(--red); }
+  button {
+    width: 100%;
+    padding: 16px;
+    border-radius: 12px;
+    border: none;
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-top: 16px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button:active { opacity: 0.7; }
+  .btn-on { background: var(--green); color: #052e16; }
+  .btn-off { background: var(--red); color: #450a0a; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; }
+  .dir-long { color: var(--green); }
+  .dir-short { color: var(--red); }
+  .empty-state { color: var(--muted); text-align: center; padding: 20px 0; font-size: 0.9rem; }
+  .config-note { font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
+  #configBox { display: none; }
+  input[type=text] {
+    width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); margin-top: 6px; font-size: 0.85rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>🪙 Gold Scalper</h1>
+<div class="subtitle">Sweep + FVG confluence strategy</div>
+
+<div class="card">
+  <div class="status-row">
+    <span class="status-label">Status</span>
+    <span id="statusBadge" class="status-badge status-off">Loading...</span>
+  </div>
+  <button id="toggleBtn" onclick="toggleBot()">Loading...</button>
+</div>
+
+<div class="card">
+  <div class="status-row">
+    <span class="status-label" style="margin-bottom:8px;">Recent signals</span>
+  </div>
+  <div id="signalsTable"><div class="empty-state">Loading...</div></div>
+</div>
+
+<div class="card" id="configCard">
+  <button style="background:var(--border); color:var(--text); font-size:0.85rem;" onclick="toggleConfig()">⚙️ Setup (first time only)</button>
+  <div id="configBox">
+    <div class="config-note">GitHub username</div>
+    <input type="text" id="ghUser" placeholder="your-username">
+    <div class="config-note">Repo name</div>
+    <input type="text" id="ghRepo" placeholder="gold-scalper-bot">
+    <div class="config-note">Fine-grained token (repo contents: read & write, scoped to this repo ONLY)</div>
+    <input type="text" id="ghToken" placeholder="github_pat_...">
+    <button style="margin-top:12px;" onclick="saveConfig()">Save</button>
+  </div>
+</div>
+
+<script>
+function getConfig() {
+  return {
+    user: localStorage.getItem('gh_user') || '',
+    repo: localStorage.getItem('gh_repo') || '',
+    token: localStorage.getItem('gh_token') || '',
+  };
+}
+function toggleConfig() {
+  document.getElementById('configBox').style.display =
+    document.getElementById('configBox').style.display === 'block' ? 'none' : 'block';
+}
+function saveConfig() {
+  localStorage.setItem('gh_user', document.getElementById('ghUser').value.trim());
+  localStorage.setItem('gh_repo', document.getElementById('ghRepo').value.trim());
+  localStorage.setItem('gh_token', document.getElementById('ghToken').value.trim());
+  toggleConfig();
+  refresh();
+}
+
+let currentEnabled = false;
+
+async function fetchState() {
+  const cfg = getConfig();
+  if (!cfg.user || !cfg.repo) return null;
+  const url = `https://raw.githubusercontent.com/${cfg.user}/${cfg.repo}/main/state.json?t=${Date.now()}`;
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  return res.json();
+}
+
+async function fetchSignals() {
+  const cfg = getConfig();
+  if (!cfg.user || !cfg.repo) return [];
+  const url = `https://raw.githubusercontent.com/${cfg.user}/${cfg.repo}/main/signals_log.csv?t=${Date.now()}`;
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  const text = await res.text();
+  const lines = text.trim().split('\n').slice(1).reverse().slice(0, 15);
+  return lines.filter(l => l.length > 0).map(l => {
+    const [timestamp, direction, entry, stop, target, bot_enabled] = l.split(',');
+    return { timestamp, direction, entry, stop, target, bot_enabled };
+  });
+}
+
+function renderStatus(enabled) {
+  currentEnabled = enabled;
+  const badge = document.getElementById('statusBadge');
+  const btn = document.getElementById('toggleBtn');
+  if (enabled) {
+    badge.textContent = 'ON';
+    badge.className = 'status-badge status-on';
+    btn.textContent = 'Turn OFF';
+    btn.className = 'btn-off';
+  } else {
+    badge.textContent = 'OFF';
+    badge.className = 'status-badge status-off';
+    btn.textContent = 'Turn ON';
+    btn.className = 'btn-on';
+  }
+}
+
+function renderSignals(signals) {
+  const el = document.getElementById('signalsTable');
+  if (!signals.length) {
+    el.innerHTML = '<div class="empty-state">No signals yet</div>';
+    return;
+  }
+  let html = '<table><tr><th>Time</th><th>Dir</th><th>Entry</th><th>Stop</th><th>Target</th></tr>';
+  signals.forEach(s => {
+    html += `<tr><td>${s.timestamp.split(' ')[1] || s.timestamp}</td>
+      <td class="dir-${s.direction}">${s.direction.toUpperCase()}</td>
+      <td>${s.entry}</td><td>${s.stop}</td><td>${s.target}</td></tr>`;
+  });
+  html += '</table>';
+  el.innerHTML = html;
+}
+
+async function refresh() {
+  const state = await fetchState();
+  if (state) renderStatus(state.enabled);
+  const signals = await fetchSignals();
+  renderSignals(signals);
+}
+
+async function toggleBot() {
+  const cfg = getConfig();
+  if (!cfg.user || !cfg.repo || !cfg.token) {
+    alert('Please fill in Setup first (tap the gear button below).');
+    toggleConfig();
+    return;
+  }
+  const btn = document.getElementById('toggleBtn');
+  btn.textContent = 'Updating...';
+
+  const apiUrl = `https://api.github.com/repos/${cfg.user}/${cfg.repo}/contents/state.json`;
+  const getRes = await fetch(apiUrl, { headers: { Authorization: `token ${cfg.token}` } });
+  const getData = await getRes.json();
+  const sha = getData.sha;
+  const currentContent = JSON.parse(atob(getData.content));
+
+  const newEnabled = !currentEnabled;
+  currentContent.enabled = newEnabled;
+  const newContentB64 = btoa(JSON.stringify(currentContent, null, 2));
+
+  const putRes = await fetch(apiUrl, {
+    method: 'PUT',
+    headers: { Authorization: `token ${cfg.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message: `Toggle bot ${newEnabled ? 'ON' : 'OFF'} from control panel`,
+      content: newContentB64,
+      sha: sha,
+    }),
+  });
+
+  if (putRes.ok) {
+    renderStatus(newEnabled);
+  } else {
+    alert('Update failed. Check your token/repo settings.');
+    btn.textContent = currentEnabled ? 'Turn OFF' : 'Turn ON';
+  }
+}
+
+refresh();
+setInterval(refresh, 30000); // auto-refresh every 30s
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('service-worker.js').catch(() => {});
+}
+</script>
+</body>
+</html>
