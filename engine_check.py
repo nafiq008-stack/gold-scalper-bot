@@ -12,7 +12,7 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
  
-TWELVE_DATA_API_KEY = os.environ["90208414ac244d9ab0a6ff233885c6f0"]
+TWELVE_DATA_API_KEY = os.environ["TWELVE_DATA_API_KEY"]
  
 SYMBOL = "XAU/USD"
 INTERVAL = "5min"
